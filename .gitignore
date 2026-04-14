@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.vscode/
+trading_history.db
+trading_history.db-shm
+trading_history.db-wal
