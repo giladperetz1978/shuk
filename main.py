@@ -27,6 +27,9 @@ TOP_10_SYMBOLS = [
 RISK_POOL = ["PLTR", "SOFI", "UPST", "IONQ", "RIOT", "MARA", "RKLB", "HIMS"]
 FEATURE_KEYS = ["momentum", "swing", "volatility", "mean_reversion", "breakout", "quality"]
 MARKET_REGIMES = ["bull_trend", "risk_off", "range_bound", "volatile_trend", "mixed"]
+ACTION_THRESHOLD = 0.90
+FEE_RATE = 0.001  # 0.1% estimated commission/slippage per executed trade
+DECISION_INTERVAL_CYCLES = 3  # 3 vote rounds x 5m = 15m final trading decision
 
 PERSONALITY_WEIGHTS = {
     "risk_seeker": 0.14,
@@ -214,6 +217,8 @@ class TradeRecord:
     amount: float
     price: float
     vote_ratio: float
+    fee: float = 0.0
+    realized_pnl: float = 0.0
 
 
 @dataclass
@@ -230,6 +235,7 @@ class CycleResult:
     universe: List[str] = field(default_factory=list)
     market_regime: str = "mixed"
     learning_summary: Dict[str, Any] = field(default_factory=dict)
+    performance_summary: Dict[str, float] = field(default_factory=dict)
     agent_state: List[Dict[str, Any]] = field(default_factory=list)
 
 
@@ -544,6 +550,72 @@ class VotingTradingEngine:
         self.portfolio = Portfolio(initial_cash)
         self.last_prices: Dict[str, float] = {}
         self.pending_feedback: List[Dict[str, Any]] = []
+        self.total_fees_paid = 0.0
+        self.closed_trade_pnls: List[float] = []
+        self.equity_peak = initial_cash
+        self.max_drawdown = 0.0
+        self.vote_window: Dict[str, Dict[str, float]] = {}
+        self.vote_window_rounds = 0
+
+    def _accumulate_vote_window(self, vote_summary: Dict[str, Dict[str, float]]) -> None:
+        for symbol, vote in vote_summary.items():
+            acc = self.vote_window.setdefault(
+                symbol,
+                {"buy_sum": 0.0, "sell_sum": 0.0, "conv_sum": 0.0, "samples": 0.0},
+            )
+            acc["buy_sum"] += vote["buy_ratio"]
+            acc["sell_sum"] += vote["sell_ratio"]
+            acc["conv_sum"] += vote["avg_conviction"]
+            acc["samples"] += 1.0
+        self.vote_window_rounds += 1
+
+    def _window_vote(self, symbol: str, fallback: Dict[str, float]) -> Dict[str, float]:
+        acc = self.vote_window.get(symbol)
+        if not acc or acc["samples"] <= 0:
+            return fallback
+        buy_ratio = acc["buy_sum"] / acc["samples"]
+        sell_ratio = acc["sell_sum"] / acc["samples"]
+        avg_conviction = acc["conv_sum"] / acc["samples"]
+        return {
+            "buy_ratio": buy_ratio,
+            "sell_ratio": sell_ratio,
+            "avg_conviction": avg_conviction,
+            "consensus": buy_ratio - sell_ratio,
+        }
+
+    def _reset_vote_window(self) -> None:
+        self.vote_window = {}
+        self.vote_window_rounds = 0
+
+    def _apply_fee(self, gross_amount: float) -> float:
+        fee = abs(gross_amount) * FEE_RATE
+        self.total_fees_paid += fee
+        self.portfolio.cash = max(0.0, self.portfolio.cash - fee)
+        return fee
+
+    def _performance_summary(self, current_value: float) -> Dict[str, float]:
+        self.equity_peak = max(self.equity_peak, current_value)
+        if self.equity_peak > 0:
+            drawdown = (self.equity_peak - current_value) / self.equity_peak
+            self.max_drawdown = max(self.max_drawdown, drawdown)
+
+        wins = [pnl for pnl in self.closed_trade_pnls if pnl > 0]
+        losses = [pnl for pnl in self.closed_trade_pnls if pnl < 0]
+        closed_count = len(self.closed_trade_pnls)
+        win_rate = (len(wins) / closed_count) if closed_count else 0.0
+        avg_win = (sum(wins) / len(wins)) if wins else 0.0
+        avg_loss = (sum(losses) / len(losses)) if losses else 0.0
+        net_after_fees = current_value - self.initial_cash
+
+        return {
+            "win_rate": win_rate,
+            "avg_win": avg_win,
+            "avg_loss": avg_loss,
+            "max_drawdown": self.max_drawdown,
+            "net_after_fees": net_after_fees,
+            "fees_paid": self.total_fees_paid,
+            "closed_trades": float(closed_count),
+        }
 
     def _detect_market_regime(self, signals: Dict[str, Signal]) -> str:
         if not signals:
@@ -638,9 +710,10 @@ class VotingTradingEngine:
     def execute_cycle(
         self,
         signals: Dict[str, Signal],
-        vote_threshold: float = 0.60,
+        vote_threshold: float = ACTION_THRESHOLD,
         cycle_num: int = 0,
         universe: Optional[List[str]] = None,
+        execute_trades: bool = True,
     ) -> CycleResult:
         messages: List[str] = []
         trades_done: List[TradeRecord] = []
@@ -662,6 +735,7 @@ class VotingTradingEngine:
                 universe=universe or [],
                 market_regime="mixed",
                 learning_summary=self._build_learning_summary("mixed", {"learned_events": 0.0, "avg_reward": 0.0}),
+                performance_summary=self._performance_summary(portfolio_value),
                 agent_state=[agent.to_state() for agent in self.agents],
             )
 
@@ -671,7 +745,7 @@ class VotingTradingEngine:
 
         portfolio_value_before = self.portfolio.total_value(self.last_prices)
         avg_volatility = sum(signal.vol for signal in signals.values()) / max(1, len(signals))
-        reserve_ratio = clamp(0.10 + avg_volatility * 7.0, 0.08, 0.22)
+        reserve_ratio = clamp(0.28 + avg_volatility * 4.0, 0.25, 0.35)
         reserve_cash = portfolio_value_before * reserve_ratio
         cycle_buy_budget = min(
             self.portfolio.cash * (0.34 if market_regime in {"bull_trend", "volatile_trend"} else 0.24),
@@ -736,16 +810,58 @@ class VotingTradingEngine:
                 )
 
         learning_summary = self._build_learning_summary(market_regime, learning_report)
+        self._accumulate_vote_window(vote_summary)
+        window_rounds = self.vote_window_rounds
         messages.append(
             (
                 f"Regime={market_regime} | Leader={learning_summary['leader_personality']} | "
                 f"Confidence={learning_summary['avg_confidence']:.2f} | Exploration={learning_summary['avg_exploration']:.2f}"
             )
         )
+        mode_text = "TRADE EXECUTION" if execute_trades else "LEARNING VOTES ONLY"
+        messages.append(
+            f"Mode: {mode_text} | Vote window={window_rounds}/{DECISION_INTERVAL_CYCLES} | Threshold={vote_threshold:.0%}"
+        )
         if learning_summary["learned_events"] > 0:
             messages.append(
                 f"Learning update: {learning_summary['learned_events']} feedback events | avg reward={learning_summary['avg_reward']:.3f}"
             )
+
+        if not execute_trades:
+            value = self.portfolio.total_value(self.last_prices)
+            perf = self._performance_summary(value)
+            messages.append(
+                (
+                    f"Stats: win={perf['win_rate']:.0%} | avgW=${perf['avg_win']:.2f} | "
+                    f"avgL=${perf['avg_loss']:.2f} | MDD={perf['max_drawdown']:.1%} | "
+                    f"net(after fees)=${perf['net_after_fees']:.2f}"
+                )
+            )
+            messages.append(f"Portfolio value: ${value:.2f} | Cash: ${self.portfolio.cash:.2f}")
+            return CycleResult(
+                cycle=cycle_num,
+                timestamp=timestamp,
+                trades=trades_done,
+                portfolio_value=value,
+                cash=self.portfolio.cash,
+                holdings=copy.deepcopy(self.portfolio.holdings),
+                prices=copy.deepcopy(self.last_prices),
+                vote_summary=vote_summary,
+                messages=messages,
+                universe=universe or [],
+                market_regime=market_regime,
+                learning_summary=learning_summary,
+                performance_summary=perf,
+                agent_state=[agent.to_state() for agent in self.agents],
+            )
+
+        for proposal in proposals:
+            symbol = proposal["symbol"]
+            final_vote = self._window_vote(symbol, vote_summary[symbol])
+            proposal["buy_ratio"] = final_vote["buy_ratio"]
+            proposal["sell_ratio"] = final_vote["sell_ratio"]
+            proposal["avg_conviction"] = final_vote["avg_conviction"]
+            vote_summary[symbol] = final_vote
 
         for proposal in proposals:
             symbol = proposal["symbol"]
@@ -761,9 +877,15 @@ class VotingTradingEngine:
 
             excess_value = (current_weight - cap) * portfolio_value_before
             qty_to_trim = min(holding_qty, excess_value / signal.price)
+            avg_cost = self.portfolio.holdings.get(symbol, Holding(0.0, signal.price)).avg_price
             proceeds = self.portfolio.sell(symbol, signal.price, qty_to_trim)
             if proceeds <= 0:
                 continue
+
+            fee = self._apply_fee(proceeds)
+            cost_basis = avg_cost * qty_to_trim
+            realized_pnl = proceeds - fee - cost_basis
+            self.closed_trade_pnls.append(realized_pnl)
 
             trades_done.append(
                 TradeRecord(
@@ -773,10 +895,12 @@ class VotingTradingEngine:
                     amount=proceeds,
                     price=signal.price,
                     vote_ratio=proposal["sell_ratio"],
+                    fee=fee,
+                    realized_pnl=realized_pnl,
                 )
             )
             messages.append(
-                f"TRIM {symbol}: rebalance qty={qty_to_trim:.4f}, proceeds=${proceeds:.2f}, cap={cap:.0%}"
+                f"TRIM {symbol}: qty={qty_to_trim:.4f}, net=${(proceeds - fee):.2f}, cap={cap:.0%}"
             )
 
         for proposal in proposals:
@@ -788,8 +912,12 @@ class VotingTradingEngine:
             if holding_qty > 0 and sell_ratio >= vote_threshold:
                 portion = min(1.0, (sell_ratio - vote_threshold) / max(1e-6, 1.0 - vote_threshold))
                 qty_to_sell = holding_qty * portion
+                avg_cost = self.portfolio.holdings.get(symbol, Holding(0.0, signal.price)).avg_price
                 proceeds = self.portfolio.sell(symbol, signal.price, qty_to_sell)
                 if proceeds > 0:
+                    fee = self._apply_fee(proceeds)
+                    realized_pnl = proceeds - fee - (avg_cost * qty_to_sell)
+                    self.closed_trade_pnls.append(realized_pnl)
                     trades_done.append(
                         TradeRecord(
                             action="SELL",
@@ -798,10 +926,12 @@ class VotingTradingEngine:
                             amount=proceeds,
                             price=signal.price,
                             vote_ratio=sell_ratio,
+                            fee=fee,
+                            realized_pnl=realized_pnl,
                         )
                     )
                     messages.append(
-                        f"SELL {symbol}: ratio={sell_ratio:.0%}, qty={qty_to_sell:.4f}, proceeds=${proceeds:.2f}"
+                        f"SELL {symbol}: ratio={sell_ratio:.0%}, qty={qty_to_sell:.4f}, net=${(proceeds - fee):.2f}"
                     )
 
         buy_candidates: List[Dict[str, Any]] = []
@@ -839,6 +969,7 @@ class VotingTradingEngine:
             qty = self.portfolio.buy(symbol, signal.price, amount)
             if qty > 0:
                 cycle_buy_budget -= amount
+                fee = self._apply_fee(amount)
                 trades_done.append(
                     TradeRecord(
                         action="BUY",
@@ -847,15 +978,26 @@ class VotingTradingEngine:
                         amount=amount,
                         price=signal.price,
                         vote_ratio=candidate["buy_ratio"],
+                        fee=fee,
+                        realized_pnl=-fee,
                     )
                 )
                 messages.append(
-                    f"BUY  {symbol}: ratio={candidate['buy_ratio']:.0%}, qty={qty:.4f}, spent=${amount:.2f}"
+                    f"BUY  {symbol}: ratio={candidate['buy_ratio']:.0%}, qty={qty:.4f}, spent=${amount:.2f}, fee=${fee:.2f}"
                 )
 
         self.pending_feedback = pending_feedback
         value = self.portfolio.total_value(self.last_prices)
+        perf = self._performance_summary(value)
+        messages.append(
+            (
+                f"Stats: win={perf['win_rate']:.0%} | avgW=${perf['avg_win']:.2f} | "
+                f"avgL=${perf['avg_loss']:.2f} | MDD={perf['max_drawdown']:.1%} | "
+                f"net(after fees)=${perf['net_after_fees']:.2f}"
+            )
+        )
         messages.append(f"Portfolio value: ${value:.2f} | Cash: ${self.portfolio.cash:.2f}")
+        self._reset_vote_window()
 
         return CycleResult(
             cycle=cycle_num,
@@ -870,6 +1012,7 @@ class VotingTradingEngine:
             universe=universe or [],
             market_regime=market_regime,
             learning_summary=learning_summary,
+            performance_summary=perf,
             agent_state=[agent.to_state() for agent in self.agents],
         )
 
@@ -892,6 +1035,7 @@ def run_simulation(
     interval_seconds: int,
     cycles: int,
     seed: Optional[int],
+    decision_interval_cycles: int = DECISION_INTERVAL_CYCLES,
     persisted_agents: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     if seed is not None:
@@ -911,7 +1055,14 @@ def run_simulation(
         print(f"\n[{timestamp}] Cycle {cycle_index} | Universe: {', '.join(symbols)}")
 
         signals = market.fetch_signals(symbols)
-        result = engine.execute_cycle(signals=signals, vote_threshold=0.60, cycle_num=cycle_index, universe=symbols)
+        execute_trades = cycle_index % max(1, decision_interval_cycles) == 0
+        result = engine.execute_cycle(
+            signals=signals,
+            vote_threshold=ACTION_THRESHOLD,
+            cycle_num=cycle_index,
+            universe=symbols,
+            execute_trades=execute_trades,
+        )
         for line in result.messages:
             print(f"  - {line}")
 
@@ -924,12 +1075,18 @@ def run_simulation(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Autonomous adaptive trading demo")
     parser.add_argument("--cash", type=float, default=500.0, help="Starting cash in USD")
-    parser.add_argument("--agents", type=int, default=100, help="Number of agents")
+    parser.add_argument("--agents", type=int, default=60, help="Number of agents")
     parser.add_argument(
         "--interval-seconds",
         type=int,
         default=300,
-        help="Voting and trading interval in seconds (default 300 = 5 minutes)",
+        help="Voting interval in seconds (default 300 = 5 minutes)",
+    )
+    parser.add_argument(
+        "--decision-interval-cycles",
+        type=int,
+        default=DECISION_INTERVAL_CYCLES,
+        help="How many vote cycles to aggregate before final trade execution (default 3 = 15 minutes)",
     )
     parser.add_argument(
         "--cycles",
@@ -950,12 +1107,17 @@ def main() -> None:
         raise ValueError("--agents should be at least 10")
     if args.interval_seconds <= 0:
         raise ValueError("--interval-seconds must be positive")
+    if args.decision_interval_cycles <= 0:
+        raise ValueError("--decision-interval-cycles must be positive")
     if args.cycles < 0:
         raise ValueError("--cycles cannot be negative")
 
     print("Starting autonomous adaptive trading demo...")
     print(
-        f"Agents={args.agents}, Starting cash=${args.cash:.2f}, Interval={args.interval_seconds}s, Cycles={args.cycles}"
+        (
+            f"Agents={args.agents}, Starting cash=${args.cash:.2f}, Vote interval={args.interval_seconds}s, "
+            f"Decision every {args.decision_interval_cycles} cycles, Cycles={args.cycles}"
+        )
     )
 
     run_simulation(
@@ -964,6 +1126,7 @@ def main() -> None:
         interval_seconds=args.interval_seconds,
         cycles=args.cycles,
         seed=args.seed,
+        decision_interval_cycles=args.decision_interval_cycles,
     )
 
 

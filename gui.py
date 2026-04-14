@@ -13,6 +13,8 @@ from matplotlib.figure import Figure
 
 from db import TradingDB
 from main import (
+    ACTION_THRESHOLD,
+    DECISION_INTERVAL_CYCLES,
     CycleResult,
     MarketData,
     TOP_10_SYMBOLS,
@@ -289,7 +291,7 @@ class TradingApp:
         tk.Label(footer, text="Agents:", font=("Consolas", 9), bg=PANEL, fg=MUTED).pack(side="left", padx=(14, 2))
         self._ent_agents = tk.Entry(footer, width=5, bg=PANEL, fg=TEXT, insertbackground=TEXT,
                                     font=("Consolas", 9), relief="solid", bd=1)
-        self._ent_agents.insert(0, "100")
+        self._ent_agents.insert(0, "60")
         self._ent_agents.pack(side="left")
 
         tk.Label(footer, text="Interval (s):", font=("Consolas", 9), bg=PANEL, fg=MUTED).pack(side="left", padx=(14, 2))
@@ -426,9 +428,10 @@ class TradingApp:
 
             result = engine.execute_cycle(
                 signals=signals,
-                vote_threshold=0.60,
+                vote_threshold=ACTION_THRESHOLD,
                 cycle_num=cycle_index,
                 universe=symbols,
+                execute_trades=(cycle_index % DECISION_INTERVAL_CYCLES == 0),
             )
             self._queue.put(result)
 
@@ -487,9 +490,9 @@ class TradingApp:
         self._lbl_pnl.config(text=f"{'+'if pnl>=0 else ''}{pnl_pct:.2f}%", fg=pnl_color)
         self._lbl_cycle.config(text=str(result.cycle))
         self._lbl_regime.config(text=result.market_regime.replace("_", " "))
+        perf = result.performance_summary
         learn_text = (
-            f"C {result.learning_summary.get('avg_confidence', 0.0):.2f} | "
-            f"E {result.learning_summary.get('avg_exploration', 0.0):.2f}"
+            f"W {perf.get('win_rate', 0.0):.0%} | DD {perf.get('max_drawdown', 0.0):.1%}"
         )
         self._lbl_learn.config(text=learn_text)
 
@@ -501,6 +504,13 @@ class TradingApp:
 
         # Log
         self._log_cycle_header(result)
+        for message in result.messages:
+            if message.startswith("Stats:"):
+                self._log_write(f"    {message}\n", "warn")
+            elif message.startswith("Mode:"):
+                self._log_write(f"    {message}\n", "cycle")
+            elif message.startswith("Portfolio value:"):
+                self._log_write(f"    {message}\n", "muted")
         for t in result.trades:
             self._append_trade_to_log(
                 result.timestamp.isoformat(), result.cycle,
