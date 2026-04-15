@@ -25,6 +25,15 @@ const tradesBody = document.getElementById("trades-body");
 const lastUpdateEl = document.getElementById("last-update");
 const apiBaseInput = document.getElementById("api-base");
 const saveApiBtn = document.getElementById("save-api");
+const engineStatusEl = document.getElementById("engine-status");
+const worldSummaryEl = document.getElementById("world-summary");
+const agentsInput = document.getElementById("cfg-agents");
+const intervalInput = document.getElementById("cfg-interval");
+const decisionInput = document.getElementById("cfg-decision");
+const cashInput = document.getElementById("cfg-cash");
+const cyclesInput = document.getElementById("cfg-cycles");
+const startEngineBtn = document.getElementById("start-engine");
+const stopEngineBtn = document.getElementById("stop-engine");
 
 function normalizeBase(value) {
   if (!value) {
@@ -44,6 +53,60 @@ function getApiBase() {
 
 let apiBase = getApiBase();
 
+function getEngineConfigFromInputs() {
+  return {
+    agent_count: Number(agentsInput?.value || 1000),
+    interval_seconds: Number(intervalInput?.value || 300),
+    decision_interval_cycles: Number(decisionInput?.value || 3),
+    cash: Number(cashInput?.value || 500),
+    cycles: Number(cyclesInput?.value || 0),
+  };
+}
+
+function applyEngineConfigToInputs(config) {
+  if (!config) {
+    return;
+  }
+  if (agentsInput) {
+    agentsInput.value = String(config.agent_count ?? 1000);
+  }
+  if (intervalInput) {
+    intervalInput.value = String(config.interval_seconds ?? 300);
+  }
+  if (decisionInput) {
+    decisionInput.value = String(config.decision_interval_cycles ?? 3);
+  }
+  if (cashInput) {
+    cashInput.value = String(config.cash ?? 500);
+  }
+  if (cyclesInput) {
+    cyclesInput.value = String(config.cycles ?? 0);
+  }
+}
+
+function setEngineStatus(engine) {
+  if (!engineStatusEl) {
+    return;
+  }
+  if (!engine) {
+    engineStatusEl.textContent = "סטטוס מנוע לא זמין";
+    return;
+  }
+  const running = Boolean(engine.running);
+  const cycleText = engine.last_cycle ? `מחזור ${engine.last_cycle}` : "ללא מחזורים עדיין";
+  engineStatusEl.textContent = running ? `רץ: ${cycleText}` : "מנוע כבוי";
+  engineStatusEl.style.color = running ? "#3ecf8e" : "#f0b429";
+  if (worldSummaryEl) {
+    worldSummaryEl.textContent = engine.world_summary || "-";
+  }
+  if (startEngineBtn) {
+    startEngineBtn.disabled = running;
+  }
+  if (stopEngineBtn) {
+    stopEngineBtn.disabled = !running;
+  }
+}
+
 if (apiBaseInput) {
   apiBaseInput.value = apiBase;
 }
@@ -54,6 +117,57 @@ if (saveApiBtn) {
     localStorage.setItem("apiBaseUrl", apiBase);
     refresh();
   });
+}
+
+if (startEngineBtn) {
+  startEngineBtn.addEventListener("click", async () => {
+    try {
+      const config = getEngineConfigFromInputs();
+      localStorage.setItem("engineConfig", JSON.stringify(config));
+      const res = await fetch(apiPath("/api/engine/start"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(config),
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload.detail || "failed to start engine");
+      }
+      const payload = await res.json();
+      setEngineStatus(payload.engine);
+      refresh();
+    } catch (error) {
+      setConnection(false, `שגיאה בהפעלת מנוע: ${error.message}`);
+    }
+  });
+}
+
+if (stopEngineBtn) {
+  stopEngineBtn.addEventListener("click", async () => {
+    try {
+      const res = await fetch(apiPath("/api/engine/stop"), {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        throw new Error(payload.detail || "failed to stop engine");
+      }
+      const payload = await res.json();
+      setEngineStatus(payload.engine);
+      refresh();
+    } catch (error) {
+      setConnection(false, `שגיאה בעצירת מנוע: ${error.message}`);
+    }
+  });
+}
+
+const savedConfig = localStorage.getItem("engineConfig");
+if (savedConfig) {
+  try {
+    applyEngineConfigToInputs(JSON.parse(savedConfig));
+  } catch (_) {
+    // ignore malformed persisted config
+  }
 }
 
 function apiPath(path) {
@@ -93,18 +207,22 @@ function renderTrades(items) {
 
 async function refresh() {
   try {
-    const [summaryRes, tradesRes] = await Promise.all([
+    const [summaryRes, tradesRes, engineRes] = await Promise.all([
       fetch(apiPath("/api/summary")),
       fetch(apiPath("/api/trades?limit=20")),
+      fetch(apiPath("/api/engine/status")),
     ]);
 
-    if (!summaryRes.ok || !tradesRes.ok) {
+    if (!summaryRes.ok || !tradesRes.ok || !engineRes.ok) {
       throw new Error("API error");
     }
 
     const summary = await summaryRes.json();
     const trades = await tradesRes.json();
+    const engine = await engineRes.json();
     const latest = summary.latest_snapshot;
+    applyEngineConfigToInputs(engine.config);
+    setEngineStatus(engine);
 
     if (latest) {
       valueEl.textContent = fmtMoney(latest.value);

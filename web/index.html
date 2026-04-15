@@ -21,6 +21,40 @@
         </div>
       </header>
 
+      <section class="card wide">
+        <div class="row">
+          <h2>שליטה על המנוע</h2>
+          <small id="engine-status">בודק סטטוס מנוע...</small>
+        </div>
+        <div class="controls-grid">
+          <label>
+            סוכנים
+            <input id="cfg-agents" type="number" min="10" step="10" value="1000" />
+          </label>
+          <label>
+            אינטרוול הצבעה (שניות)
+            <input id="cfg-interval" type="number" min="5" step="5" value="300" />
+          </label>
+          <label>
+            החלטה כל X מחזורים
+            <input id="cfg-decision" type="number" min="1" step="1" value="3" />
+          </label>
+          <label>
+            מזומן התחלתי (USD)
+            <input id="cfg-cash" type="number" min="10" step="10" value="500" />
+          </label>
+          <label>
+            מספר מחזורים (0 = תמיד)
+            <input id="cfg-cycles" type="number" min="0" step="1" value="0" />
+          </label>
+        </div>
+        <div class="btn-row">
+          <button id="start-engine" type="button" class="btn-main">הפעל מנוע</button>
+          <button id="stop-engine" type="button" class="btn-danger">עצור מנוע</button>
+          <small id="world-summary">-</small>
+        </div>
+      </section>
+
       <section class="grid">
         <article class="card">
           <h2>שווי תיק</h2>

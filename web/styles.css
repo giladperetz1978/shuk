@@ -81,6 +81,52 @@ body {
   cursor: pointer;
 }
 
+.controls-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.controls-grid label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.controls-grid input {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0a1a2a;
+  color: var(--text);
+  padding: 8px 10px;
+}
+
+.btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-main,
+.btn-danger {
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.btn-main {
+  background: #1c6aa8;
+}
+
+.btn-danger {
+  background: #8e2a2a;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
