@@ -4,6 +4,8 @@ __pycache__/
 *.pyo
 *.pyd
 .vscode/
+build/
+dist/
 trading_history.db
 trading_history.db-shm
 trading_history.db-wal

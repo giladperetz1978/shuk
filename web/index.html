@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0d1b2a" />
+    <title>FPI Trading Monitor</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero">
+        <h1>FPI Trading Monitor</h1>
+        <p>דשבורד נייד למעקב מצב המנוע ב-24/7</p>
+        <div id="connection" class="badge badge-warn">ממתין לנתונים...</div>
+        <div class="api-config">
+          <label for="api-base">כתובת API (VPS):</label>
+          <input id="api-base" type="url" placeholder="https://your-vps-domain.com" />
+          <button id="save-api" type="button">שמירה</button>
+        </div>
+      </header>
+
+      <section class="grid">
+        <article class="card">
+          <h2>שווי תיק</h2>
+          <p id="value" class="big">-</p>
+        </article>
+        <article class="card">
+          <h2>מזומן</h2>
+          <p id="cash" class="big">-</p>
+        </article>
+        <article class="card">
+          <h2>P&L</h2>
+          <p id="pnl" class="big">-</p>
+        </article>
+        <article class="card">
+          <h2>מחזור אחרון</h2>
+          <p id="cycle" class="big">-</p>
+        </article>
+      </section>
+
+      <section class="card wide">
+        <div class="row">
+          <h2>עסקאות אחרונות</h2>
+          <small id="last-update">לא עודכן עדיין</small>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>זמן</th>
+                <th>פעולה</th>
+                <th>סימול</th>
+                <th>כמות</th>
+                <th>מחיר</th>
+              </tr>
+            </thead>
+            <tbody id="trades-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+
+    <script src="/assets/app.js"></script>
+  </body>
+</html>

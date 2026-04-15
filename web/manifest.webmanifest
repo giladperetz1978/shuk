@@ -1,0 +1,9 @@
+{
+  "name": "FPI Trading Monitor",
+  "short_name": "FPI Monitor",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#06131f",
+  "theme_color": "#0d1b2a",
+  "icons": []
+}

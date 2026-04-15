@@ -2,10 +2,14 @@ import argparse
 import copy
 import math
 import random
+import re
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote_plus
 
 import pandas as pd
 import requests
@@ -25,11 +29,33 @@ TOP_10_SYMBOLS = [
 ]
 
 RISK_POOL = ["PLTR", "SOFI", "UPST", "IONQ", "RIOT", "MARA", "RKLB", "HIMS"]
-FEATURE_KEYS = ["momentum", "swing", "volatility", "mean_reversion", "breakout", "quality"]
+FEATURE_KEYS = [
+    "momentum",
+    "swing",
+    "volatility",
+    "mean_reversion",
+    "breakout",
+    "quality",
+    "news_sentiment",
+    "news_volume",
+    "news_urgency",
+    "macro_pressure",
+    "peer_momentum",
+]
 MARKET_REGIMES = ["bull_trend", "risk_off", "range_bound", "volatile_trend", "mixed"]
-ACTION_THRESHOLD = 0.90
-FEE_RATE = 0.001  # 0.1% estimated commission/slippage per executed trade
+ACTION_THRESHOLD = 0.60
+FAST_ACTION_THRESHOLD = 0.46
+# Tradier pricing model (stocks):
+# - Pro plan: $10/month subscription + $0 per stock trade.
+# - Regular plan: $0.35 per trade.
+TRADIER_PRO_ENABLED = True
+TRADIER_PRO_MONTHLY_FEE_USD = 10.0
+TRADIER_REGULAR_FEE_PER_TRADE_USD = 0.35
+SECONDS_PER_30_DAY_MONTH = 30 * 24 * 60 * 60
 DECISION_INTERVAL_CYCLES = 3  # 3 vote rounds x 5m = 15m final trading decision
+NEWS_CACHE_SECONDS = 900
+MACRO_CACHE_SECONDS = 1800
+GOOGLE_NEWS_RSS = "https://news.google.com/rss/search"
 
 PERSONALITY_WEIGHTS = {
     "risk_seeker": 0.14,
@@ -57,6 +83,11 @@ PERSONALITY_TEMPLATES: Dict[str, Dict[str, Any]] = {
             "mean_reversion": -0.20,
             "breakout": 1.15,
             "quality": 0.25,
+            "news_sentiment": 0.55,
+            "news_volume": 0.12,
+            "news_urgency": 0.30,
+            "macro_pressure": -0.20,
+            "peer_momentum": 0.70,
         },
     },
     "risk_averse": {
@@ -73,6 +104,11 @@ PERSONALITY_TEMPLATES: Dict[str, Dict[str, Any]] = {
             "mean_reversion": 0.35,
             "breakout": 0.15,
             "quality": 1.05,
+            "news_sentiment": 0.35,
+            "news_volume": 0.08,
+            "news_urgency": -0.55,
+            "macro_pressure": -0.75,
+            "peer_momentum": 0.25,
         },
     },
     "trend_follower": {
@@ -89,6 +125,11 @@ PERSONALITY_TEMPLATES: Dict[str, Dict[str, Any]] = {
             "mean_reversion": -0.35,
             "breakout": 0.85,
             "quality": 0.60,
+            "news_sentiment": 0.42,
+            "news_volume": 0.10,
+            "news_urgency": 0.10,
+            "macro_pressure": -0.25,
+            "peer_momentum": 0.95,
         },
     },
     "contrarian": {
@@ -105,6 +146,11 @@ PERSONALITY_TEMPLATES: Dict[str, Dict[str, Any]] = {
             "mean_reversion": 1.15,
             "breakout": -0.35,
             "quality": 0.55,
+            "news_sentiment": -0.18,
+            "news_volume": 0.05,
+            "news_urgency": -0.12,
+            "macro_pressure": 0.10,
+            "peer_momentum": -0.35,
         },
     },
     "mean_reversion": {
@@ -121,6 +167,11 @@ PERSONALITY_TEMPLATES: Dict[str, Dict[str, Any]] = {
             "mean_reversion": 1.30,
             "breakout": -0.20,
             "quality": 0.50,
+            "news_sentiment": -0.10,
+            "news_volume": 0.05,
+            "news_urgency": -0.18,
+            "macro_pressure": 0.05,
+            "peer_momentum": -0.28,
         },
     },
     "breakout_chaser": {
@@ -137,6 +188,11 @@ PERSONALITY_TEMPLATES: Dict[str, Dict[str, Any]] = {
             "mean_reversion": -0.50,
             "breakout": 1.40,
             "quality": 0.25,
+            "news_sentiment": 0.60,
+            "news_volume": 0.22,
+            "news_urgency": 0.35,
+            "macro_pressure": -0.15,
+            "peer_momentum": 0.88,
         },
     },
     "volatility_surfer": {
@@ -153,6 +209,11 @@ PERSONALITY_TEMPLATES: Dict[str, Dict[str, Any]] = {
             "mean_reversion": -0.20,
             "breakout": 0.85,
             "quality": 0.10,
+            "news_sentiment": 0.22,
+            "news_volume": 0.28,
+            "news_urgency": 0.52,
+            "macro_pressure": -0.35,
+            "peer_momentum": 0.55,
         },
     },
     "balanced": {
@@ -169,6 +230,11 @@ PERSONALITY_TEMPLATES: Dict[str, Dict[str, Any]] = {
             "mean_reversion": 0.30,
             "breakout": 0.35,
             "quality": 0.85,
+            "news_sentiment": 0.35,
+            "news_volume": 0.08,
+            "news_urgency": 0.05,
+            "macro_pressure": -0.30,
+            "peer_momentum": 0.45,
         },
     },
 }
@@ -183,6 +249,71 @@ BASE_REGIME_SKILL = {
     "volatility_surfer": {"bull_trend": 0.20, "risk_off": -0.15, "range_bound": -0.20, "volatile_trend": 0.85, "mixed": 0.10},
     "balanced": {"bull_trend": 0.25, "risk_off": 0.10, "range_bound": 0.20, "volatile_trend": -0.05, "mixed": 0.30},
 }
+
+SYMBOL_NEWS_QUERIES = {
+    "AAPL": "Apple stock",
+    "MSFT": "Microsoft stock",
+    "NVDA": "NVIDIA stock AI chips",
+    "AMZN": "Amazon stock cloud retail",
+    "GOOGL": "Alphabet Google stock",
+    "META": "Meta Platforms stock",
+    "TSLA": "Tesla stock",
+    "JPM": "JPMorgan stock banking",
+    "LLY": "Eli Lilly stock",
+    "AVGO": "Broadcom stock",
+    "PLTR": "Palantir stock",
+    "SOFI": "SoFi stock",
+    "UPST": "Upstart stock",
+    "IONQ": "IonQ stock",
+    "RIOT": "Riot Platforms stock bitcoin mining",
+    "MARA": "MARA stock bitcoin mining",
+    "RKLB": "Rocket Lab stock",
+    "HIMS": "Hims stock",
+}
+SECTOR_BENCHMARKS = {
+    "AAPL": "XLK",
+    "MSFT": "XLK",
+    "NVDA": "XLK",
+    "AMZN": "XLY",
+    "GOOGL": "XLK",
+    "META": "XLC",
+    "TSLA": "XLY",
+    "JPM": "XLF",
+    "LLY": "XLV",
+    "AVGO": "SOXX",
+    "PLTR": "XLK",
+    "SOFI": "XLF",
+    "UPST": "XLF",
+    "IONQ": "XLK",
+    "RIOT": "IBIT",
+    "MARA": "IBIT",
+    "RKLB": "ITA",
+    "HIMS": "XLV",
+}
+MACRO_SYMBOLS = ["SPY", "QQQ", "IWM", "TLT", "GLD", "XLK", "XLF", "XLV", "XLY", "SOXX", "IBIT", "ITA", "^VIX"]
+POSITIVE_NEWS_TERMS = {
+    "beat", "beats", "surge", "surges", "growth", "upgrade", "upgrades", "profit", "profits", "record",
+    "strong", "bullish", "win", "wins", "partnership", "launch", "approval", "approved", "guidance raised",
+    "buyback", "expands", "expansion", "rebound", "outperform",
+}
+NEGATIVE_NEWS_TERMS = {
+    "miss", "misses", "drop", "drops", "fall", "falls", "downgrade", "downgrades", "lawsuit", "probe",
+    "investigation", "recall", "layoffs", "weak", "warning", "cuts", "cut", "plunge", "fraud", "delay",
+    "bankruptcy", "risk", "loss", "losses", "decline", "declines", "antitrust", "tariff",
+}
+URGENT_NEWS_TERMS = {
+    "breaking", "urgent", "halts", "halt", "guidance", "sec", "fda", "lawsuit", "probe", "recall",
+    "merger", "acquisition", "earnings", "tariff", "ceasefire", "war", "ban", "approval",
+}
+MACRO_NEWS_QUERY = "stock market inflation rates federal reserve recession earnings when:1d"
+
+
+def sign(value: float) -> float:
+    if value > 0:
+        return 1.0
+    if value < 0:
+        return -1.0
+    return 0.0
 
 
 def sigmoid(x: float) -> float:
@@ -201,6 +332,29 @@ class Signal:
     ret_6: float
     vol: float
     distance_to_sma20: float
+    news_sentiment: float = 0.0
+    news_volume: float = 0.0
+    news_urgency: float = 0.0
+    macro_pressure: float = 0.0
+    peer_momentum: float = 0.0
+    headline_count: int = 0
+
+
+@dataclass
+class NewsSnapshot:
+    sentiment: float = 0.0
+    volume_score: float = 0.0
+    urgency_bias: float = 0.0
+    headline_count: int = 0
+    top_headline: str = ""
+
+
+@dataclass
+class MacroSnapshot:
+    market_pressure: float = 0.0
+    benchmark_returns: Dict[str, float] = field(default_factory=dict)
+    headline_bias: float = 0.0
+    summary: str = "neutral"
 
 
 @dataclass
@@ -364,6 +518,11 @@ class Agent:
         mean_reversion = clamp(-signal.distance_to_sma20 * 140.0, -2.5, 2.5)
         breakout = clamp(signal.distance_to_sma20 * 140.0, -2.5, 2.5)
         quality = clamp((signal.ret_6 - signal.vol * 0.7) * 120.0, -2.5, 2.5)
+        news_sentiment = clamp(signal.news_sentiment * 2.4, -2.5, 2.5)
+        news_volume = clamp(signal.news_volume * 1.8, 0.0, 2.5)
+        news_urgency = clamp(signal.news_urgency * 2.2, -2.5, 2.5)
+        macro_pressure = clamp(signal.macro_pressure * 2.2, -2.5, 2.5)
+        peer_momentum = clamp(signal.peer_momentum * 180.0, -2.5, 2.5)
         return {
             "momentum": momentum,
             "swing": swing,
@@ -371,6 +530,11 @@ class Agent:
             "mean_reversion": mean_reversion,
             "breakout": breakout,
             "quality": quality,
+            "news_sentiment": news_sentiment,
+            "news_volume": news_volume,
+            "news_urgency": news_urgency,
+            "macro_pressure": macro_pressure,
+            "peer_momentum": peer_momentum,
         }
 
     def evaluate(self, signal: Signal, market_regime: str, holding_qty: float) -> Dict[str, Any]:
@@ -379,9 +543,16 @@ class Agent:
         score += self.regime_skill.get(market_regime, 0.0)
         score += self.symbol_memory.get(signal.symbol, 0.0)
 
-        risk_drive = self.risk_appetite * (0.25 * features["momentum"] + 0.25 * features["breakout"])
+        risk_drive = self.risk_appetite * (
+            0.22 * features["momentum"]
+            + 0.22 * features["breakout"]
+            + 0.18 * features["news_sentiment"]
+            + 0.14 * features["peer_momentum"]
+        )
         discipline_drive = self.discipline * (0.20 * features["quality"] - 0.28 * max(features["volatility"] - 0.6, 0.0))
-        caution = (1.0 - self.risk_appetite) * max(features["volatility"] - 0.5, 0.0) * 0.45
+        caution = (1.0 - self.risk_appetite) * (
+            max(features["volatility"] - 0.5, 0.0) * 0.45 + max(-features["macro_pressure"], 0.0) * 0.22
+        )
         exploration_noise = random.uniform(-self.exploration, self.exploration)
 
         raw_score = (score + risk_drive + discipline_drive - caution + exploration_noise) * (0.75 + 0.40 * self.confidence)
@@ -391,9 +562,16 @@ class Agent:
         if holding_qty > 0:
             inventory_pressure += 0.85 * max(-features["momentum"], 0.0)
             inventory_pressure += 0.55 * max(features["volatility"] - 0.5, 0.0)
+            inventory_pressure += 0.65 * max(-features["news_urgency"], 0.0)
+            inventory_pressure += 0.35 * max(-features["macro_pressure"], 0.0)
             inventory_pressure += (1.0 - self.confidence) * 0.40
 
-        sell_score = -raw_score + inventory_pressure + (1.0 - self.risk_appetite) * 0.15 * features["volatility"]
+        sell_score = (
+            -raw_score
+            + inventory_pressure
+            + (1.0 - self.risk_appetite) * 0.15 * features["volatility"]
+            + 0.18 * max(-features["news_sentiment"], 0.0)
+        )
         sell_prob = sigmoid(sell_score / 1.9)
         action_strength = clamp(buy_prob - sell_prob, -1.0, 1.0)
 
@@ -471,9 +649,15 @@ class MarketData:
     def __init__(self) -> None:
         self._last_prices: Dict[str, float] = {}
         self._session = requests.Session()
+        self._news_cache: Dict[str, tuple[float, NewsSnapshot]] = {}
+        self._macro_cache: Optional[tuple[float, MacroSnapshot]] = None
+        self.last_world_summary = "macro=neutral | headlines=0"
 
     def fetch_signals(self, symbols: List[str]) -> Dict[str, Signal]:
         signals: Dict[str, Signal] = {}
+        news_map = self._fetch_news_map(symbols)
+        macro = self._fetch_macro_snapshot()
+        headline_total = 0
 
         for symbol in symbols:
             series = self._fetch_close_series(symbol)
@@ -490,6 +674,10 @@ class MarketData:
             vol = float(close.pct_change().dropna().tail(24).std())
             sma20 = float(close.tail(20).mean())
             distance_to_sma20 = 0.0 if sma20 == 0 else float((price - sma20) / sma20)
+            news = news_map.get(symbol, NewsSnapshot())
+            headline_total += news.headline_count
+            peer_symbol = SECTOR_BENCHMARKS.get(symbol, "SPY")
+            peer_ret = macro.benchmark_returns.get(peer_symbol, macro.benchmark_returns.get("SPY", 0.0))
 
             signals[symbol] = Signal(
                 symbol=symbol,
@@ -498,10 +686,157 @@ class MarketData:
                 ret_6=ret_6,
                 vol=vol,
                 distance_to_sma20=distance_to_sma20,
+                news_sentiment=news.sentiment,
+                news_volume=news.volume_score,
+                news_urgency=news.urgency_bias,
+                macro_pressure=macro.market_pressure,
+                peer_momentum=peer_ret,
+                headline_count=news.headline_count,
             )
             self._last_prices[symbol] = price
 
+        focus = sorted(
+            ((symbol, snapshot) for symbol, snapshot in news_map.items() if snapshot.headline_count > 0),
+            key=lambda item: abs(item[1].urgency_bias) + item[1].volume_score,
+            reverse=True,
+        )[:2]
+        focus_text = ", ".join(
+            f"{symbol}:{snapshot.sentiment:+.2f}/{snapshot.headline_count}h"
+            for symbol, snapshot in focus
+        ) or "none"
+        self.last_world_summary = f"macro={macro.summary} ({macro.market_pressure:+.2f}) | headlines={headline_total} | focus={focus_text}"
         return signals
+
+    def _fetch_news_map(self, symbols: List[str]) -> Dict[str, NewsSnapshot]:
+        return {symbol: self._fetch_news_snapshot(symbol) for symbol in symbols}
+
+    def _fetch_news_snapshot(self, symbol: str) -> NewsSnapshot:
+        cached = self._news_cache.get(symbol)
+        now = time.time()
+        if cached and now - cached[0] < NEWS_CACHE_SECONDS:
+            return cached[1]
+
+        query = SYMBOL_NEWS_QUERIES.get(symbol, f"{symbol} stock") + " when:1d"
+        url = (
+            f"{GOOGLE_NEWS_RSS}?q={quote_plus(query)}&hl=en-US&gl=US&ceid=US:en"
+        )
+        snapshot = NewsSnapshot()
+        try:
+            response = self._session.get(url, timeout=10)
+            response.raise_for_status()
+            root = ET.fromstring(response.text)
+            items = root.findall(".//item")[:8]
+            weighted_sentiment = 0.0
+            weighted_urgency = 0.0
+            total_weight = 0.0
+            top_headline = ""
+            for item in items:
+                raw_title = (item.findtext("title") or "").strip()
+                title = re.sub(r"\s+-\s+[^-]+$", "", raw_title)
+                if not top_headline and title:
+                    top_headline = title
+                pub_date = item.findtext("pubDate") or ""
+                hours_old = 6.0
+                if pub_date:
+                    try:
+                        published_at = parsedate_to_datetime(pub_date)
+                        hours_old = max(0.25, (datetime.now(published_at.tzinfo) - published_at).total_seconds() / 3600.0)
+                    except Exception:
+                        hours_old = 6.0
+                sentiment_score, urgency_score = self._score_news_text(title)
+                weight = 1.0 / (1.0 + hours_old / 6.0)
+                weighted_sentiment += sentiment_score * weight
+                weighted_urgency += urgency_score * sign(sentiment_score) * weight
+                total_weight += weight
+
+            headline_count = len(items)
+            if total_weight > 0:
+                snapshot = NewsSnapshot(
+                    sentiment=clamp(weighted_sentiment / total_weight, -1.0, 1.0),
+                    volume_score=clamp(math.log1p(headline_count) / math.log(6.0), 0.0, 1.4),
+                    urgency_bias=clamp(weighted_urgency / total_weight, -1.0, 1.0),
+                    headline_count=headline_count,
+                    top_headline=top_headline,
+                )
+        except Exception:
+            snapshot = NewsSnapshot()
+
+        self._news_cache[symbol] = (now, snapshot)
+        return snapshot
+
+    def _score_news_text(self, text: str) -> tuple[float, float]:
+        lower_text = text.lower()
+        pos_hits = sum(1 for term in POSITIVE_NEWS_TERMS if term in lower_text)
+        neg_hits = sum(1 for term in NEGATIVE_NEWS_TERMS if term in lower_text)
+        urgent_hits = sum(1 for term in URGENT_NEWS_TERMS if term in lower_text)
+
+        sentiment = clamp((pos_hits - neg_hits) / 2.5, -1.0, 1.0)
+        urgency = clamp(urgent_hits / 2.0, 0.0, 1.0)
+
+        if sentiment == 0.0 and ("upgrade" in lower_text or "downgrade" in lower_text):
+            sentiment = 0.5 if "upgrade" in lower_text else -0.5
+        return sentiment, urgency
+
+    def _fetch_macro_snapshot(self) -> MacroSnapshot:
+        now = time.time()
+        if self._macro_cache and now - self._macro_cache[0] < MACRO_CACHE_SECONDS:
+            return self._macro_cache[1]
+
+        benchmark_returns: Dict[str, float] = {}
+        for symbol in MACRO_SYMBOLS:
+            series = self._fetch_close_series(symbol)
+            if series is None or len(series) < 6:
+                continue
+            close = series.dropna()
+            if len(close) < 6:
+                continue
+            benchmark_returns[symbol] = float(close.iloc[-1] / close.iloc[-6] - 1.0)
+
+        spy_ret = benchmark_returns.get("SPY", 0.0)
+        qqq_ret = benchmark_returns.get("QQQ", 0.0)
+        iwm_ret = benchmark_returns.get("IWM", 0.0)
+        tlt_ret = benchmark_returns.get("TLT", 0.0)
+        vix_ret = benchmark_returns.get("^VIX", 0.0)
+        macro_news = self._fetch_macro_news_bias()
+        pressure = clamp(
+            spy_ret * 180.0 + qqq_ret * 120.0 + iwm_ret * 80.0 + tlt_ret * 40.0 - vix_ret * 90.0 + macro_news * 0.35,
+            -1.0,
+            1.0,
+        )
+        if pressure > 0.20:
+            summary = "supportive"
+        elif pressure < -0.20:
+            summary = "risk_off"
+        else:
+            summary = "mixed"
+
+        snapshot = MacroSnapshot(
+            market_pressure=pressure,
+            benchmark_returns=benchmark_returns,
+            headline_bias=macro_news,
+            summary=summary,
+        )
+        self._macro_cache = (now, snapshot)
+        return snapshot
+
+    def _fetch_macro_news_bias(self) -> float:
+        try:
+            url = f"{GOOGLE_NEWS_RSS}?q={quote_plus(MACRO_NEWS_QUERY)}&hl=en-US&gl=US&ceid=US:en"
+            response = self._session.get(url, timeout=10)
+            response.raise_for_status()
+            root = ET.fromstring(response.text)
+            items = root.findall(".//item")[:6]
+            if not items:
+                return 0.0
+
+            total = 0.0
+            for item in items:
+                title = (item.findtext("title") or "").strip()
+                sentiment, _ = self._score_news_text(title)
+                total += sentiment
+            return clamp(total / len(items), -1.0, 1.0)
+        except Exception:
+            return 0.0
 
     def _fetch_close_series(self, symbol: str) -> Optional[pd.Series]:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
@@ -544,9 +879,10 @@ class MarketData:
 
 
 class VotingTradingEngine:
-    def __init__(self, agents: List[Agent], initial_cash: float) -> None:
+    def __init__(self, agents: List[Agent], initial_cash: float, decision_interval_cycles: int = DECISION_INTERVAL_CYCLES) -> None:
         self.agents = agents
         self.initial_cash = initial_cash
+        self.decision_interval_cycles = max(1, decision_interval_cycles)
         self.portfolio = Portfolio(initial_cash)
         self.last_prices: Dict[str, float] = {}
         self.pending_feedback: List[Dict[str, Any]] = []
@@ -556,6 +892,8 @@ class VotingTradingEngine:
         self.max_drawdown = 0.0
         self.vote_window: Dict[str, Dict[str, float]] = {}
         self.vote_window_rounds = 0
+        self.started_at_ts = time.time()
+        self.last_fee_charge_ts = self.started_at_ts
 
     def _accumulate_vote_window(self, vote_summary: Dict[str, Dict[str, float]]) -> None:
         for symbol, vote in vote_summary.items():
@@ -587,11 +925,30 @@ class VotingTradingEngine:
         self.vote_window = {}
         self.vote_window_rounds = 0
 
-    def _apply_fee(self, gross_amount: float) -> float:
-        fee = abs(gross_amount) * FEE_RATE
+    def _apply_trade_fee(self, gross_amount: float) -> float:
+        if TRADIER_PRO_ENABLED:
+            fee = 0.0
+        else:
+            fee = TRADIER_REGULAR_FEE_PER_TRADE_USD if abs(gross_amount) > 0 else 0.0
         self.total_fees_paid += fee
         self.portfolio.cash = max(0.0, self.portfolio.cash - fee)
         return fee
+
+    def _apply_subscription_fee(self, now_ts: float) -> float:
+        if not TRADIER_PRO_ENABLED:
+            self.last_fee_charge_ts = now_ts
+            return 0.0
+
+        elapsed = max(0.0, now_ts - self.last_fee_charge_ts)
+        if elapsed <= 0.0:
+            return 0.0
+
+        prorated_fee = (elapsed / SECONDS_PER_30_DAY_MONTH) * TRADIER_PRO_MONTHLY_FEE_USD
+        charged_fee = min(self.portfolio.cash, prorated_fee)
+        self.total_fees_paid += charged_fee
+        self.portfolio.cash = max(0.0, self.portfolio.cash - charged_fee)
+        self.last_fee_charge_ts = now_ts
+        return charged_fee
 
     def _performance_summary(self, current_value: float) -> Dict[str, float]:
         self.equity_peak = max(self.equity_peak, current_value)
@@ -719,6 +1076,10 @@ class VotingTradingEngine:
         trades_done: List[TradeRecord] = []
         vote_summary: Dict[str, Dict[str, float]] = {}
         timestamp = datetime.now()
+        subscription_fee = self._apply_subscription_fee(time.time())
+
+        if subscription_fee > 0:
+            messages.append(f"Tradier Pro subscription fee charged: ${subscription_fee:.4f}")
 
         if not signals:
             portfolio_value = self.portfolio.total_value(self.last_prices)
@@ -820,7 +1181,7 @@ class VotingTradingEngine:
         )
         mode_text = "TRADE EXECUTION" if execute_trades else "LEARNING VOTES ONLY"
         messages.append(
-            f"Mode: {mode_text} | Vote window={window_rounds}/{DECISION_INTERVAL_CYCLES} | Threshold={vote_threshold:.0%}"
+            f"Mode: {mode_text} | Vote window={window_rounds}/{self.decision_interval_cycles} | Threshold={vote_threshold:.0%}"
         )
         if learning_summary["learned_events"] > 0:
             messages.append(
@@ -882,7 +1243,7 @@ class VotingTradingEngine:
             if proceeds <= 0:
                 continue
 
-            fee = self._apply_fee(proceeds)
+            fee = self._apply_trade_fee(proceeds)
             cost_basis = avg_cost * qty_to_trim
             realized_pnl = proceeds - fee - cost_basis
             self.closed_trade_pnls.append(realized_pnl)
@@ -915,7 +1276,7 @@ class VotingTradingEngine:
                 avg_cost = self.portfolio.holdings.get(symbol, Holding(0.0, signal.price)).avg_price
                 proceeds = self.portfolio.sell(symbol, signal.price, qty_to_sell)
                 if proceeds > 0:
-                    fee = self._apply_fee(proceeds)
+                    fee = self._apply_trade_fee(proceeds)
                     realized_pnl = proceeds - fee - (avg_cost * qty_to_sell)
                     self.closed_trade_pnls.append(realized_pnl)
                     trades_done.append(
@@ -969,7 +1330,7 @@ class VotingTradingEngine:
             qty = self.portfolio.buy(symbol, signal.price, amount)
             if qty > 0:
                 cycle_buy_budget -= amount
-                fee = self._apply_fee(amount)
+                fee = self._apply_trade_fee(amount)
                 trades_done.append(
                     TradeRecord(
                         action="BUY",
@@ -1043,7 +1404,11 @@ def run_simulation(
 
     market = MarketData()
     agents = AgentFactory.build_population(agent_count, persisted_state=persisted_agents)
-    engine = VotingTradingEngine(agents=agents, initial_cash=cash)
+    engine = VotingTradingEngine(
+        agents=agents,
+        initial_cash=cash,
+        decision_interval_cycles=decision_interval_cycles,
+    )
 
     cycle_index = 0
     while True:
@@ -1075,7 +1440,7 @@ def run_simulation(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Autonomous adaptive trading demo")
     parser.add_argument("--cash", type=float, default=500.0, help="Starting cash in USD")
-    parser.add_argument("--agents", type=int, default=60, help="Number of agents")
+    parser.add_argument("--agents", type=int, default=1000, help="Number of agents")
     parser.add_argument(
         "--interval-seconds",
         type=int,
