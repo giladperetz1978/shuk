@@ -107,6 +107,16 @@ def manifest() -> FileResponse:
     return FileResponse(str(WEB_DIR / "manifest.webmanifest"), media_type="application/manifest+json")
 
 
+@app.get("/styles.css")
+def styles() -> FileResponse:
+    return FileResponse(str(WEB_DIR / "styles.css"), media_type="text/css")
+
+
+@app.get("/app.js")
+def app_js() -> FileResponse:
+    return FileResponse(str(WEB_DIR / "app.js"), media_type="application/javascript")
+
+
 @app.get("/sw.js")
 def service_worker() -> FileResponse:
     return FileResponse(str(WEB_DIR / "sw.js"), media_type="application/javascript")

@@ -1,9 +1,10 @@
 const CACHE_NAME = "fpi-pwa-v1";
 const ASSETS = [
-  "/",
-  "/manifest.webmanifest",
-  "/assets/styles.css",
-  "/assets/app.js",
+  "./",
+  "./index.html",
+  "./manifest.webmanifest",
+  "./styles.css",
+  "./app.js",
 ];
 
 self.addEventListener("install", (event) => {
