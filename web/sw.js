@@ -1,4 +1,4 @@
-const CACHE_NAME = "fpi-pwa-v4";
+const CACHE_NAME = "fpi-pwa-v5";
 const ASSETS = [
   "./",
   "./index.html",
