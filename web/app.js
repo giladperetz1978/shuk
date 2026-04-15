@@ -28,6 +28,11 @@ const saveApiBtn = document.getElementById("save-api");
 const installBtn = document.getElementById("install-app");
 const installHint = document.getElementById("install-hint");
 const DEFAULT_API_BASE = "https://144-91-96-77.nip.io";
+const LEGACY_PLACEHOLDER_VALUES = new Set([
+  "https://your-vps-domain.com",
+  "http://your-vps-domain.com",
+  "your-vps-domain.com",
+]);
 const engineStatusEl = document.getElementById("engine-status");
 const worldSummaryEl = document.getElementById("world-summary");
 const agentsInput = document.getElementById("cfg-agents");
@@ -50,8 +55,12 @@ function getApiBase() {
   if (qs) {
     return normalizeBase(qs);
   }
-  const saved = localStorage.getItem("apiBaseUrl");
-  return normalizeBase(saved || DEFAULT_API_BASE);
+  const savedRaw = localStorage.getItem("apiBaseUrl");
+  const saved = normalizeBase(savedRaw || "");
+  if (!saved || LEGACY_PLACEHOLDER_VALUES.has(saved)) {
+    return DEFAULT_API_BASE;
+  }
+  return saved;
 }
 
 let apiBase = getApiBase();
@@ -120,16 +129,13 @@ function setEngineStatus(engine) {
 window.addEventListener("beforeinstallprompt", (event) => {
   event.preventDefault();
   deferredInstallPrompt = event;
-  if (installBtn) {
-    installBtn.hidden = false;
-  }
   setInstallHint("אפשר להתקין עכשיו בלחיצה על INSTALL");
 });
 
 window.addEventListener("appinstalled", () => {
   deferredInstallPrompt = null;
   if (installBtn) {
-    installBtn.hidden = true;
+    installBtn.disabled = true;
   }
   setInstallHint("ההתקנה הושלמה בהצלחה");
 });
@@ -137,6 +143,9 @@ window.addEventListener("appinstalled", () => {
 if (apiBaseInput) {
   apiBaseInput.value = apiBase;
 }
+
+// Persist normalized base so old placeholders are replaced automatically.
+localStorage.setItem("apiBaseUrl", apiBase);
 
 if (saveApiBtn) {
   saveApiBtn.addEventListener("click", () => {
@@ -156,11 +165,12 @@ if (installBtn) {
       deferredInstallPrompt.prompt();
       const choice = await deferredInstallPrompt.userChoice;
       deferredInstallPrompt = null;
-      installBtn.hidden = true;
+      installBtn.disabled = true;
       if (choice && choice.outcome === "accepted") {
         setInstallHint("ההתקנה אושרה");
       } else {
         setInstallHint("ההתקנה בוטלה");
+        installBtn.disabled = false;
       }
     } catch (_error) {
       setInstallHint("לא ניתן היה לפתוח חלון התקנה כרגע");
