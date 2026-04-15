@@ -27,6 +27,7 @@ const apiBaseInput = document.getElementById("api-base");
 const saveApiBtn = document.getElementById("save-api");
 const installBtn = document.getElementById("install-app");
 const installHint = document.getElementById("install-hint");
+const DEFAULT_API_BASE = "https://144-91-96-77.nip.io";
 const engineStatusEl = document.getElementById("engine-status");
 const worldSummaryEl = document.getElementById("world-summary");
 const agentsInput = document.getElementById("cfg-agents");
@@ -50,7 +51,7 @@ function getApiBase() {
     return normalizeBase(qs);
   }
   const saved = localStorage.getItem("apiBaseUrl");
-  return normalizeBase(saved || "");
+  return normalizeBase(saved || DEFAULT_API_BASE);
 }
 
 let apiBase = getApiBase();
