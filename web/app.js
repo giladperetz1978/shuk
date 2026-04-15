@@ -25,6 +25,8 @@ const tradesBody = document.getElementById("trades-body");
 const lastUpdateEl = document.getElementById("last-update");
 const apiBaseInput = document.getElementById("api-base");
 const saveApiBtn = document.getElementById("save-api");
+const installBtn = document.getElementById("install-app");
+const installHint = document.getElementById("install-hint");
 const engineStatusEl = document.getElementById("engine-status");
 const worldSummaryEl = document.getElementById("world-summary");
 const agentsInput = document.getElementById("cfg-agents");
@@ -52,6 +54,13 @@ function getApiBase() {
 }
 
 let apiBase = getApiBase();
+let deferredInstallPrompt = null;
+
+function setInstallHint(text) {
+  if (installHint) {
+    installHint.textContent = text;
+  }
+}
 
 function getEngineConfigFromInputs() {
   return {
@@ -107,6 +116,23 @@ function setEngineStatus(engine) {
   }
 }
 
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  if (installBtn) {
+    installBtn.hidden = false;
+  }
+  setInstallHint("אפשר להתקין עכשיו בלחיצה על INSTALL");
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  if (installBtn) {
+    installBtn.hidden = true;
+  }
+  setInstallHint("ההתקנה הושלמה בהצלחה");
+});
+
 if (apiBaseInput) {
   apiBaseInput.value = apiBase;
 }
@@ -116,6 +142,28 @@ if (saveApiBtn) {
     apiBase = normalizeBase(apiBaseInput ? apiBaseInput.value : "");
     localStorage.setItem("apiBaseUrl", apiBase);
     refresh();
+  });
+}
+
+if (installBtn) {
+  installBtn.addEventListener("click", async () => {
+    try {
+      if (!deferredInstallPrompt) {
+        setInstallHint("בדפדפן זה ניתן להתקין דרך תפריט הדפדפן");
+        return;
+      }
+      deferredInstallPrompt.prompt();
+      const choice = await deferredInstallPrompt.userChoice;
+      deferredInstallPrompt = null;
+      installBtn.hidden = true;
+      if (choice && choice.outcome === "accepted") {
+        setInstallHint("ההתקנה אושרה");
+      } else {
+        setInstallHint("ההתקנה בוטלה");
+      }
+    } catch (_error) {
+      setInstallHint("לא ניתן היה לפתוח חלון התקנה כרגע");
+    }
   });
 }
 

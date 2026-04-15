@@ -81,6 +81,18 @@ body {
   cursor: pointer;
 }
 
+.install-row {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+#install-hint {
+  color: var(--muted);
+}
+
 .controls-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
