@@ -66,6 +66,10 @@ function getApiBase() {
 let apiBase = getApiBase();
 let deferredInstallPrompt = null;
 
+function isStandalone() {
+  return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+}
+
 function setInstallHint(text) {
   if (installHint) {
     installHint.textContent = text;
@@ -156,10 +160,24 @@ if (saveApiBtn) {
 }
 
 if (installBtn) {
+  if (isStandalone()) {
+    installBtn.disabled = true;
+    setInstallHint("האפליקציה כבר מותקנת במכשיר זה");
+  }
+
   installBtn.addEventListener("click", async () => {
     try {
       if (!deferredInstallPrompt) {
-        setInstallHint("בדפדפן זה ניתן להתקין דרך תפריט הדפדפן");
+        const ua = navigator.userAgent || "";
+        if (ua.includes("Edg")) {
+          setInstallHint("אם לא נפתח חלון: בתפריט הדפדפן בחר Apps ואז Install this site as an app");
+          alert("Edge: פתח ⋯ > Apps > Install this site as an app");
+        } else if (ua.includes("Chrome")) {
+          setInstallHint("אם לא נפתח חלון: בתפריט הדפדפן בחר Install app");
+          alert("Chrome: פתח ⋮ > Install app");
+        } else {
+          setInstallHint("בדפדפן זה ההתקנה נעשית דרך תפריט הדפדפן (Add to Home Screen/Install)");
+        }
         return;
       }
       deferredInstallPrompt.prompt();

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#13314c"/>
+      <stop offset="1" stop-color="#0a1b2c"/>
+    </linearGradient>
+  </defs>
+  <rect width="192" height="192" rx="36" fill="url(#g)"/>
+  <path d="M24 128 L56 98 L82 116 L122 64 L168 86" fill="none" stroke="#66d9ef" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="56" cy="98" r="7" fill="#3ecf8e"/>
+  <circle cx="122" cy="64" r="7" fill="#3ecf8e"/>
+  <text x="96" y="158" text-anchor="middle" fill="#ecf5ff" font-family="Segoe UI, Arial, sans-serif" font-size="32" font-weight="700">FPI</text>
+</svg>

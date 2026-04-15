@@ -1,10 +1,12 @@
-const CACHE_NAME = "fpi-pwa-v3";
+const CACHE_NAME = "fpi-pwa-v4";
 const ASSETS = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
   "./styles.css",
   "./app.js",
+  "./icon-192.svg",
+  "./icon-512.svg",
 ];
 
 self.addEventListener("install", (event) => {
