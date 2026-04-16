@@ -39,10 +39,12 @@ const worldSummaryEl = document.getElementById("world-summary");
 const agentsInput = document.getElementById("cfg-agents");
 const intervalInput = document.getElementById("cfg-interval");
 const decisionInput = document.getElementById("cfg-decision");
+const thresholdInput = document.getElementById("cfg-threshold");
 const cashInput = document.getElementById("cfg-cash");
 const cyclesInput = document.getElementById("cfg-cycles");
 const startEngineBtn = document.getElementById("start-engine");
 const stopEngineBtn = document.getElementById("stop-engine");
+const updateEngineConfigBtn = document.getElementById("update-engine-config");
 
 function normalizeBase(value) {
   if (!value) {
@@ -114,6 +116,7 @@ function getEngineConfigFromInputs() {
     agent_count: Number(agentsInput?.value || 1000),
     interval_seconds: Number(intervalInput?.value || 300),
     decision_interval_cycles: 1,
+    action_threshold: Number(thresholdInput?.value || 0.6),
     cash: Number(cashInput?.value || 500),
     cycles: Number(cyclesInput?.value || 0),
   };
@@ -127,6 +130,7 @@ function getPersistedEngineConfig(config) {
     ...config,
     decision_interval_cycles: 1,
     cycles: 0,
+    action_threshold: Number(config.action_threshold ?? 0.6),
   };
 }
 
@@ -142,6 +146,9 @@ function applyEngineConfigToInputs(config) {
   }
   if (decisionInput) {
     decisionInput.value = String(config.decision_interval_cycles ?? 1);
+  }
+  if (thresholdInput) {
+    thresholdInput.value = String(config.action_threshold ?? 0.6);
   }
   if (cashInput) {
     cashInput.value = String(config.cash ?? 500);
@@ -278,6 +285,37 @@ if (stopEngineBtn) {
       refresh();
     } catch (error) {
       setConnection(false, `שגיאה בעצירת מנוע: ${error.message}`);
+    }
+  });
+}
+
+if (updateEngineConfigBtn) {
+  updateEngineConfigBtn.addEventListener("click", async () => {
+    try {
+      const payload = {
+        interval_seconds: Number(intervalInput?.value || 300),
+        action_threshold: Number(thresholdInput?.value || 0.6),
+        cycles: Number(cyclesInput?.value || 0),
+      };
+      const res = await fetch(apiPath("/api/engine/config"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const responsePayload = await res.json().catch(() => ({}));
+        throw new Error(responsePayload.detail || "failed to update engine config");
+      }
+      const responsePayload = await res.json();
+      localStorage.setItem(
+        "engineConfig",
+        JSON.stringify(getPersistedEngineConfig(responsePayload.engine?.config || getEngineConfigFromInputs())),
+      );
+      setEngineStatus(responsePayload.engine);
+      setConnection(true, "ההגדרות עודכנו וייכנסו לפני הסייקל הבא");
+      refresh();
+    } catch (error) {
+      setConnection(false, `שגיאה בעדכון הגדרות מנוע: ${error.message}`);
     }
   });
 }

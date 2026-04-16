@@ -6,6 +6,7 @@ Run with:
 
 from __future__ import annotations
 
+import math
 import sqlite3
 import threading
 import time
@@ -38,6 +39,7 @@ DEFAULT_ENGINE_CONFIG: dict[str, Any] = {
     "agent_count": 1000,
     "interval_seconds": 300,
     "decision_interval_cycles": DECISION_INTERVAL_CYCLES,
+    "action_threshold": ACTION_THRESHOLD,
     "cycles": 0,
 }
 
@@ -101,6 +103,9 @@ class EngineManager:
             raise ValueError("interval_seconds must be positive")
         if int(config["decision_interval_cycles"]) <= 0:
             raise ValueError("decision_interval_cycles must be positive")
+        action_threshold = float(config["action_threshold"])
+        if not math.isfinite(action_threshold) or action_threshold <= 0 or action_threshold > 1:
+            raise ValueError("action_threshold must be in (0, 1]")
         if int(config["cycles"]) < 0:
             raise ValueError("cycles cannot be negative")
 
@@ -128,6 +133,7 @@ class EngineManager:
                     "agent_count": int(payload.get("agent_count", config["agent_count"])),
                     "interval_seconds": int(payload.get("interval_seconds", config["interval_seconds"])),
                     "decision_interval_cycles": DECISION_INTERVAL_CYCLES,
+                    "action_threshold": float(payload.get("action_threshold", config["action_threshold"])),
                     "cycles": int(payload.get("cycles", config["cycles"])),
                 }
             )
@@ -145,6 +151,26 @@ class EngineManager:
             self._thread.start()
 
         return self.status()
+
+    def update_config(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            next_config = dict(self._config)
+            if "cash" in payload:
+                next_config["cash"] = float(payload["cash"])
+            if "agent_count" in payload:
+                next_config["agent_count"] = int(payload["agent_count"])
+            if "interval_seconds" in payload:
+                next_config["interval_seconds"] = int(payload["interval_seconds"])
+            if "action_threshold" in payload:
+                next_config["action_threshold"] = float(payload["action_threshold"])
+            if "cycles" in payload:
+                next_config["cycles"] = int(payload["cycles"])
+
+            # Keep trading every cycle; this setting is intentionally fixed.
+            next_config["decision_interval_cycles"] = DECISION_INTERVAL_CYCLES
+            self._validate(next_config)
+            self._config = next_config
+            return self.status()
 
     def stop(self) -> dict[str, Any]:
         thread_to_join: threading.Thread | None
@@ -182,12 +208,14 @@ class EngineManager:
             cycle_index = 0
             while not stop_event.is_set():
                 cycle_index += 1
+                with self._lock:
+                    current_config = dict(self._config)
                 risky = choose_risky_symbols(market)
                 symbols = TOP_10_SYMBOLS + risky
                 signals = market.fetch_signals(symbols)
                 result = engine.execute_cycle(
                     signals=signals,
-                    vote_threshold=ACTION_THRESHOLD,
+                    vote_threshold=float(current_config["action_threshold"]),
                     cycle_num=cycle_index,
                     universe=symbols,
                     execute_trades=True,
@@ -216,10 +244,10 @@ class EngineManager:
                     self._last_update = datetime.now().isoformat()
                     self._world_summary = market.last_world_summary
 
-                if config["cycles"] > 0 and cycle_index >= config["cycles"]:
+                if current_config["cycles"] > 0 and cycle_index >= current_config["cycles"]:
                     break
 
-                if stop_event.wait(config["interval_seconds"]):
+                if stop_event.wait(current_config["interval_seconds"]):
                     break
         except Exception as exc:
             with self._lock:
@@ -287,6 +315,15 @@ def engine_start(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[s
 def engine_stop() -> dict[str, Any]:
     status = engine_manager.stop()
     return {"ok": True, "engine": status}
+
+
+@app.post("/api/engine/config")
+def engine_update_config(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    try:
+        status = engine_manager.update_config(payload)
+        return {"ok": True, "engine": status}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 if WEB_DIR.exists():
