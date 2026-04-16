@@ -16,19 +16,33 @@ import requests
 
 
 TOP_10_SYMBOLS = [
-    "AAPL",
-    "MSFT",
-    "NVDA",
-    "AMZN",
-    "GOOGL",
-    "META",
-    "TSLA",
-    "JPM",
-    "LLY",
-    "AVGO",
+    # Mega-cap tech
+    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "ORCL", "ADBE",
+    # Financials
+    "JPM", "BAC", "GS", "MS", "WFC", "BRK-B", "AXP", "BLK", "SPGI", "V", "MA",
+    # Healthcare / Pharma
+    "LLY", "UNH", "JNJ", "ABBV", "MRK", "TMO", "ABT", "AMGN", "GILD", "ISRG",
+    # Consumer
+    "WMT", "COST", "HD", "MCD", "SBUX", "NKE", "TGT", "LOW", "TJX", "BKNG",
+    # Energy
+    "XOM", "CVX", "COP", "SLB", "EOG", "PSX",
+    # Industrials / Aerospace
+    "BA", "CAT", "RTX", "HON", "LMT", "NOC", "GE", "UPS", "FDX",
+    # Semiconductors (beyond NVDA/AVGO)
+    "AMD", "INTC", "QCOM", "MU", "AMAT", "LRCX", "KLAC", "TXN", "MRVL",
+    # Cloud / Software
+    "CRM", "NOW", "SNOW", "PANW", "CRWD", "ZS", "DDOG", "NET",
+    # Comm / Media
+    "NFLX", "DIS", "CMCSA", "T", "VZ",
+    # ETFs (broad market + sector)
+    "SPY", "QQQ", "IWM", "XLK", "XLF", "XLV", "XLY", "XLE", "SOXX", "IBIT",
 ]
 
-RISK_POOL = ["PLTR", "SOFI", "UPST", "IONQ", "RIOT", "MARA", "RKLB", "HIMS"]
+RISK_POOL = [
+    "PLTR", "SOFI", "UPST", "IONQ", "RIOT", "MARA", "RKLB", "HIMS",
+    "SOUN", "LUNR", "ACHR", "JOBY", "ASTS", "NVTS", "WOLF", "SMCI",
+    "COIN", "MSTR", "HOOD", "LIDR",
+]
 FEATURE_KEYS = [
     "momentum",
     "swing",
@@ -1030,7 +1044,7 @@ class VotingTradingEngine:
         return {"learned_events": float(learned_events), "avg_reward": avg_reward}
 
     def _symbol_weight_cap(self, signal: Signal, market_regime: str) -> float:
-        base_cap = 0.12 if signal.symbol in TOP_10_SYMBOLS else 0.07
+        base_cap = 0.10 if signal.symbol in TOP_10_SYMBOLS else 0.06
         trend_bonus = 0.025 if market_regime in {"bull_trend", "volatile_trend"} and signal.ret_6 > 0 else 0.0
         volatility_haircut = clamp(signal.vol * 7.0, 0.0, 0.05)
         return clamp(base_cap + trend_bonus - volatility_haircut, 0.04, 0.16)
@@ -1381,13 +1395,13 @@ class VotingTradingEngine:
 def choose_risky_symbols(market: MarketData) -> List[str]:
     risk_signals = market.fetch_signals(RISK_POOL)
     ranked = sorted(risk_signals.values(), key=lambda signal: signal.vol, reverse=True)
-    selected = [signal.symbol for signal in ranked[:2]]
+    selected = [signal.symbol for signal in ranked[:5]]
 
-    while len(selected) < 2 and len(selected) < len(RISK_POOL):
+    while len(selected) < 5 and len(selected) < len(RISK_POOL):
         candidate = random.choice([symbol for symbol in RISK_POOL if symbol not in selected])
         selected.append(candidate)
 
-    return selected[:2]
+    return selected[:5]
 
 
 def run_simulation(
