@@ -21,6 +21,7 @@ const valueEl = document.getElementById("value");
 const cashEl = document.getElementById("cash");
 const pnlEl = document.getElementById("pnl");
 const cycleEl = document.getElementById("cycle");
+const countdownEl = document.getElementById("countdown");
 const tradesBody = document.getElementById("trades-body");
 const lastUpdateEl = document.getElementById("last-update");
 const apiBaseInput = document.getElementById("api-base");
@@ -65,6 +66,33 @@ function getApiBase() {
 
 let apiBase = getApiBase();
 let deferredInstallPrompt = null;
+let countdownIntervalSeconds = 300;
+let countdownTargetTime = null;
+
+function startCountdown(intervalSeconds, lastUpdateIso) {
+  countdownIntervalSeconds = intervalSeconds || 300;
+  if (lastUpdateIso) {
+    const lastMs = new Date(lastUpdateIso).getTime();
+    countdownTargetTime = lastMs + countdownIntervalSeconds * 1000;
+  } else {
+    countdownTargetTime = Date.now() + countdownIntervalSeconds * 1000;
+  }
+}
+
+function tickCountdown() {
+  if (!countdownEl) return;
+  if (!countdownTargetTime) {
+    countdownEl.textContent = "--:--";
+    return;
+  }
+  const secsLeft = Math.max(0, Math.round((countdownTargetTime - Date.now()) / 1000));
+  const mins = Math.floor(secsLeft / 60);
+  const secs = secsLeft % 60;
+  countdownEl.textContent = `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  countdownEl.style.color = secsLeft <= 30 ? "var(--warn)" : "var(--ok)";
+}
+
+setInterval(tickCountdown, 1000);
 
 function isStandalone() {
   return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
@@ -313,6 +341,12 @@ async function refresh() {
       applyEngineConfigToInputs(engine.config);
     }
     setEngineStatus(engine);
+    if (engine.running && engine.last_update) {
+      startCountdown(
+        engine.config?.interval_seconds || 300,
+        engine.last_update,
+      );
+    }
 
     if (latest) {
       valueEl.textContent = fmtMoney(latest.value);

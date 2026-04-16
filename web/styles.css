@@ -44,6 +44,28 @@ body {
   font-size: 1.6rem;
 }
 
+.countdown-card {
+  text-align: center;
+  padding: 18px 16px 12px;
+}
+
+.countdown-timer {
+  margin: 0;
+  font-size: 40px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ok);
+  letter-spacing: 2px;
+  line-height: 1;
+}
+
+.countdown-label {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 .hero p {
   margin: 0 0 12px;
   color: var(--muted);
