@@ -9,9 +9,9 @@ An experimental paper-trading simulator with 1000 personality-driven agents, liv
 - Every cycle:
   - scans 10 large-cap symbols plus 2 higher-risk symbols,
   - lets all agents vote on buy/sell actions every 5 minutes,
-  - executes real buy/sell decisions every 3 vote rounds (15 minutes),
-  - compares that baseline against a second engine that executes buy/sell every 5 minutes,
-  - trades only when the aggregated vote passes a strict 90% threshold,
+  - executes real buy/sell decisions every vote round,
+  - compares a stricter 60% threshold engine against a faster 46% threshold engine,
+  - trades only when the aggregated vote passes the configured threshold (60% in the core engine, 46% in the fast engine),
   - keeps a 25%–35% cash reserve for survivability,
   - learns from the next cycle's price feedback.
 - Tracks performance metrics per cycle:
@@ -33,7 +33,7 @@ pip install -r requirements.txt
 
 ## Console run
 ```bash
-python main.py --cash 500 --agents 1000 --interval-seconds 300 --decision-interval-cycles 3 --cycles 12
+python main.py --cash 500 --agents 1000 --interval-seconds 300 --cycles 12
 ```
 
 ## GUI run
@@ -42,15 +42,15 @@ python gui.py
 ```
 
 The GUI now runs two strategies side by side on the same live signals and same starting cash:
-- `15m Exec`: votes every 5 minutes and only executes trades every 3 vote rounds.
-- `5m Exec`: votes every 5 minutes and executes trades every round.
+- `Core 60%`: executes every cycle with the standard 60% vote threshold.
+- `Fast 46%`: executes every cycle with the lower 46% vote threshold.
 
 The comparison view shows both P&L percentages and the current winner gap in real time.
 
 ## Useful options
 - `--cycles 0` runs forever until stopped.
 - `--interval-seconds 300` runs vote rounds every 5 minutes (default).
-- `--decision-interval-cycles 3` executes final buy/sell every 15 minutes (default).
+- Trade execution now happens every cycle.
 - `--interval-seconds 20` is useful for fast UI tests only.
 - `--seed` makes console tests reproducible.
 
@@ -73,7 +73,7 @@ Run the trading engine on your always-on machine/server, and open a lightweight 
 
 ### 1) Run the engine 24/7
 ```bash
-python main.py --cash 500 --agents 1000 --interval-seconds 300 --decision-interval-cycles 3 --cycles 0
+python main.py --cash 500 --agents 1000 --interval-seconds 300 --cycles 0
 ```
 
 ### 2) Run API + PWA host

@@ -48,8 +48,8 @@ CHART_BASE = "#58a6ff"
 SELL_COLOR = "#f85149"
 BUY_COLOR  = "#3fb950"
 FAST_LINE  = "#f0883e"
-PRIMARY_LABEL = "15m Exec"
-FAST_LABEL = "5m Exec"
+PRIMARY_LABEL = "Core 60%"
+FAST_LABEL = "Fast 46%"
 TITLE_FONT = ("Bahnschrift SemiBold", 26)
 SUBTITLE_FONT = ("Segoe UI Variable Display", 11)
 CARD_TITLE_FONT = ("Bahnschrift SemiBold", 11)
@@ -361,7 +361,7 @@ class TradingApp:
                  bg=PANEL_ALT, fg=TEXT).grid(row=0, column=1, padx=(0, 16), pady=(16, 2), sticky="w")
         tk.Label(
             title_card,
-            text="A cinematic trading deck that compares two execution rhythms on the same market tape.",
+            text="A cinematic trading deck that compares two vote thresholds on the same market tape.",
             font=SUBTITLE_FONT,
             bg=PANEL_ALT,
             fg=SOFT_TEXT,
@@ -439,7 +439,7 @@ class TradingApp:
     def _build_chart(self, parent: tk.Frame, suffix: str) -> None:
         tk.Label(parent, text="  Portfolio Comparison", font=("Bahnschrift SemiBold", 11),
                  bg=PANEL_ALT, fg=SOFT_TEXT, anchor="w").pack(fill="x", pady=(10, 0), padx=8)
-        chart_caption = tk.Label(parent, text="Two execution stories evolving on the same live market tape", font=SUBTITLE_FONT,
+        chart_caption = tk.Label(parent, text="Two threshold profiles evolving on the same live market tape", font=SUBTITLE_FONT,
                                  bg=PANEL_ALT, fg=MUTED, anchor="w")
         chart_caption.pack(fill="x", padx=10, pady=(0, 6))
         setattr(self, f"_chart_caption{suffix}", chart_caption)

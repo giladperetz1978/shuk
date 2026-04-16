@@ -52,7 +52,7 @@ TRADIER_PRO_ENABLED = True
 TRADIER_PRO_MONTHLY_FEE_USD = 10.0
 TRADIER_REGULAR_FEE_PER_TRADE_USD = 0.35
 SECONDS_PER_30_DAY_MONTH = 30 * 24 * 60 * 60
-DECISION_INTERVAL_CYCLES = 3  # 3 vote rounds x 5m = 15m final trading decision
+DECISION_INTERVAL_CYCLES = 1  # execute trade decisions on every vote cycle
 NEWS_CACHE_SECONDS = 900
 MACRO_CACHE_SECONDS = 1800
 GOOGLE_NEWS_RSS = "https://news.google.com/rss/search"
@@ -1407,7 +1407,7 @@ def run_simulation(
     engine = VotingTradingEngine(
         agents=agents,
         initial_cash=cash,
-        decision_interval_cycles=decision_interval_cycles,
+        decision_interval_cycles=DECISION_INTERVAL_CYCLES,
     )
 
     cycle_index = 0
@@ -1420,13 +1420,12 @@ def run_simulation(
         print(f"\n[{timestamp}] Cycle {cycle_index} | Universe: {', '.join(symbols)}")
 
         signals = market.fetch_signals(symbols)
-        execute_trades = cycle_index % max(1, decision_interval_cycles) == 0
         result = engine.execute_cycle(
             signals=signals,
             vote_threshold=ACTION_THRESHOLD,
             cycle_num=cycle_index,
             universe=symbols,
-            execute_trades=execute_trades,
+            execute_trades=True,
         )
         for line in result.messages:
             print(f"  - {line}")
@@ -1451,7 +1450,7 @@ def parse_args() -> argparse.Namespace:
         "--decision-interval-cycles",
         type=int,
         default=DECISION_INTERVAL_CYCLES,
-        help="How many vote cycles to aggregate before final trade execution (default 3 = 15 minutes)",
+        help="Deprecated. Trade execution now runs every cycle.",
     )
     parser.add_argument(
         "--cycles",
@@ -1481,7 +1480,7 @@ def main() -> None:
     print(
         (
             f"Agents={args.agents}, Starting cash=${args.cash:.2f}, Vote interval={args.interval_seconds}s, "
-            f"Decision every {args.decision_interval_cycles} cycles, Cycles={args.cycles}"
+            f"Trade execution every cycle, Cycles={args.cycles}"
         )
     )
 

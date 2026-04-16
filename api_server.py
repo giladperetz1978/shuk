@@ -127,9 +127,7 @@ class EngineManager:
                     "cash": float(payload.get("cash", config["cash"])),
                     "agent_count": int(payload.get("agent_count", config["agent_count"])),
                     "interval_seconds": int(payload.get("interval_seconds", config["interval_seconds"])),
-                    "decision_interval_cycles": int(
-                        payload.get("decision_interval_cycles", config["decision_interval_cycles"])
-                    ),
+                    "decision_interval_cycles": DECISION_INTERVAL_CYCLES,
                     "cycles": int(payload.get("cycles", config["cycles"])),
                 }
             )
@@ -174,7 +172,7 @@ class EngineManager:
             engine = VotingTradingEngine(
                 agents=agents,
                 initial_cash=config["cash"],
-                decision_interval_cycles=config["decision_interval_cycles"],
+                decision_interval_cycles=DECISION_INTERVAL_CYCLES,
             )
             session_id = self._db.start_session(config["cash"], config["agent_count"])
 
@@ -187,13 +185,12 @@ class EngineManager:
                 risky = choose_risky_symbols(market)
                 symbols = TOP_10_SYMBOLS + risky
                 signals = market.fetch_signals(symbols)
-                execute_trades = cycle_index % max(1, config["decision_interval_cycles"]) == 0
                 result = engine.execute_cycle(
                     signals=signals,
                     vote_threshold=ACTION_THRESHOLD,
                     cycle_num=cycle_index,
                     universe=symbols,
-                    execute_trades=execute_trades,
+                    execute_trades=True,
                 )
 
                 self._db.save_snapshot(

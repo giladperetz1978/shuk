@@ -80,9 +80,20 @@ function getEngineConfigFromInputs() {
   return {
     agent_count: Number(agentsInput?.value || 1000),
     interval_seconds: Number(intervalInput?.value || 300),
-    decision_interval_cycles: Number(decisionInput?.value || 3),
+    decision_interval_cycles: 1,
     cash: Number(cashInput?.value || 500),
     cycles: Number(cyclesInput?.value || 0),
+  };
+}
+
+function getPersistedEngineConfig(config) {
+  if (!config) {
+    return null;
+  }
+  return {
+    ...config,
+    decision_interval_cycles: 1,
+    cycles: 0,
   };
 }
 
@@ -97,7 +108,7 @@ function applyEngineConfigToInputs(config) {
     intervalInput.value = String(config.interval_seconds ?? 300);
   }
   if (decisionInput) {
-    decisionInput.value = String(config.decision_interval_cycles ?? 3);
+    decisionInput.value = String(config.decision_interval_cycles ?? 1);
   }
   if (cashInput) {
     cashInput.value = String(config.cash ?? 500);
@@ -200,7 +211,7 @@ if (startEngineBtn) {
   startEngineBtn.addEventListener("click", async () => {
     try {
       const config = getEngineConfigFromInputs();
-      localStorage.setItem("engineConfig", JSON.stringify(config));
+      localStorage.setItem("engineConfig", JSON.stringify(getPersistedEngineConfig(config)));
       const res = await fetch(apiPath("/api/engine/start"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -241,7 +252,7 @@ if (stopEngineBtn) {
 const savedConfig = localStorage.getItem("engineConfig");
 if (savedConfig) {
   try {
-    applyEngineConfigToInputs(JSON.parse(savedConfig));
+    applyEngineConfigToInputs(getPersistedEngineConfig(JSON.parse(savedConfig)));
   } catch (_) {
     // ignore malformed persisted config
   }
@@ -298,7 +309,9 @@ async function refresh() {
     const trades = await tradesRes.json();
     const engine = await engineRes.json();
     const latest = summary.latest_snapshot;
-    applyEngineConfigToInputs(engine.config);
+    if (engine.running) {
+      applyEngineConfigToInputs(engine.config);
+    }
     setEngineStatus(engine);
 
     if (latest) {
