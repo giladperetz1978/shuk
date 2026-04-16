@@ -1,4 +1,4 @@
-const CACHE_NAME = "fpi-pwa-v5";
+const CACHE_NAME = "fpi-pwa-v6";
 const ASSETS = [
   "./",
   "./index.html",
@@ -29,6 +29,15 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") {
+    return;
+  }
+
+  const requestUrl = new URL(event.request.url);
+  const isApiRequest = requestUrl.pathname.startsWith("/api/") || requestUrl.origin !== self.location.origin;
+
+  // Always fetch API/cross-origin requests from network to avoid stale engine status.
+  if (isApiRequest) {
+    event.respondWith(fetch(event.request));
     return;
   }
 

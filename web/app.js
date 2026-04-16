@@ -380,10 +380,11 @@ function renderTrades(items) {
 
 async function refresh() {
   try {
+    const noStore = { cache: "no-store" };
     const [summaryRes, tradesRes, engineRes] = await Promise.all([
-      fetch(apiPath("/api/summary")),
-      fetch(apiPath("/api/trades?limit=20")),
-      fetch(apiPath("/api/engine/status")),
+      fetch(apiPath("/api/summary"), noStore),
+      fetch(apiPath("/api/trades?limit=20"), noStore),
+      fetch(apiPath("/api/engine/status"), noStore),
     ]);
 
     if (!summaryRes.ok || !tradesRes.ok || !engineRes.ok) {
@@ -431,7 +432,7 @@ async function refresh() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(() => {
+    navigator.serviceWorker.register("sw.js?v=6").catch(() => {
       // Silent fail: PWA still works without offline cache.
     });
   });
