@@ -432,7 +432,6 @@ async function refresh() {
     renderTrades(trades.items || []);
     lastUpdateEl.textContent = `עודכן: ${new Date().toLocaleTimeString("he-IL")}`;
   } catch (error) {
-    setEngineStatus(null);
     if (String(error?.message || "").includes("HTTP 403")) {
       setConnection(false, "API חסום (403). בדוק Firewall/Proxy או כתובת VPS");
     } else if (error?.name === "AbortError") {
