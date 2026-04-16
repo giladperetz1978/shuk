@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.FpiMonitor" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:statusBarColor">#0D2236</item>
+        <item name="android:navigationBarColor">#0D2236</item>
+        <item name="colorPrimary">#0D2236</item>
+        <item name="colorPrimaryVariant">#0A1A2A</item>
+        <item name="colorOnPrimary">#ECF5FF</item>
+    </style>
+</resources>

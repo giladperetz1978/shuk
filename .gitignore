@@ -6,6 +6,11 @@ __pycache__/
 .vscode/
 build/
 dist/
+
+# Android local and build cache files
+**/.gradle/
+**/local.properties
+**/key.properties
 trading_history.db
 trading_history.db-shm
 trading_history.db-wal
