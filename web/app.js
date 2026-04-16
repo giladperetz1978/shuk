@@ -70,6 +70,7 @@ let apiBase = getApiBase();
 let deferredInstallPrompt = null;
 let countdownIntervalSeconds = 300;
 let countdownTargetTime = null;
+let lastKnownEngineRunning = null;
 
 function startCountdown(intervalSeconds, lastUpdateIso) {
   countdownIntervalSeconds = intervalSeconds || 300;
@@ -120,6 +121,10 @@ function getEngineConfigFromInputs() {
     cash: Number(cashInput?.value || 500),
     cycles: Number(cyclesInput?.value || 0),
   };
+}
+
+function persistDraftEngineConfig() {
+  localStorage.setItem("engineConfig", JSON.stringify(getPersistedEngineConfig(getEngineConfigFromInputs())));
 }
 
 function getPersistedEngineConfig(config) {
@@ -179,6 +184,12 @@ function setEngineStatus(engine) {
   if (stopEngineBtn) {
     stopEngineBtn.disabled = !running;
   }
+  if (agentsInput) {
+    agentsInput.disabled = running;
+  }
+  if (cashInput) {
+    cashInput.disabled = running;
+  }
 }
 
 window.addEventListener("beforeinstallprompt", (event) => {
@@ -209,6 +220,13 @@ if (saveApiBtn) {
     refresh();
   });
 }
+
+[agentsInput, intervalInput, thresholdInput, cashInput, cyclesInput]
+  .filter(Boolean)
+  .forEach((input) => {
+    input.addEventListener("input", persistDraftEngineConfig);
+    input.addEventListener("change", persistDraftEngineConfig);
+  });
 
 if (installBtn) {
   if (isStandalone()) {
@@ -251,7 +269,7 @@ if (startEngineBtn) {
   startEngineBtn.addEventListener("click", async () => {
     try {
       const config = getEngineConfigFromInputs();
-      localStorage.setItem("engineConfig", JSON.stringify(getPersistedEngineConfig(config)));
+      persistDraftEngineConfig();
       const res = await fetch(apiPath("/api/engine/start"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -292,11 +310,7 @@ if (stopEngineBtn) {
 if (updateEngineConfigBtn) {
   updateEngineConfigBtn.addEventListener("click", async () => {
     try {
-      const payload = {
-        interval_seconds: Number(intervalInput?.value || 300),
-        action_threshold: Number(thresholdInput?.value || 0.6),
-        cycles: Number(cyclesInput?.value || 0),
-      };
+      const payload = getEngineConfigFromInputs();
       const res = await fetch(apiPath("/api/engine/config"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -312,7 +326,7 @@ if (updateEngineConfigBtn) {
         JSON.stringify(getPersistedEngineConfig(responsePayload.engine?.config || getEngineConfigFromInputs())),
       );
       setEngineStatus(responsePayload.engine);
-      setConnection(true, "ההגדרות עודכנו וייכנסו לפני הסייקל הבא");
+      setConnection(true, "ההגדרות עודכנו; אינטרוול/אחוז/מחזורים ייכנסו בסייקל הבא");
       refresh();
     } catch (error) {
       setConnection(false, `שגיאה בעדכון הגדרות מנוע: ${error.message}`);
@@ -380,9 +394,11 @@ async function refresh() {
     const trades = await tradesRes.json();
     const engine = await engineRes.json();
     const latest = summary.latest_snapshot;
-    if (engine.running) {
+    const running = Boolean(engine.running);
+    if (lastKnownEngineRunning === null || running !== lastKnownEngineRunning) {
       applyEngineConfigToInputs(engine.config);
     }
+    lastKnownEngineRunning = running;
     setEngineStatus(engine);
     if (engine.running && engine.last_update) {
       startCountdown(

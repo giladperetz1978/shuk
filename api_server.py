@@ -154,6 +154,8 @@ class EngineManager:
 
     def update_config(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
+            if self._running and ("agent_count" in payload or "cash" in payload):
+                raise ValueError("agent_count/cash require engine restart; live update supports interval/threshold/cycles")
             next_config = dict(self._config)
             if "cash" in payload:
                 next_config["cash"] = float(payload["cash"])
