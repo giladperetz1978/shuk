@@ -445,9 +445,22 @@ async function refresh() {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js?v=6").catch(() => {
-      // Silent fail: PWA still works without offline cache.
+    // Reliability-first mode: remove SW caching to avoid stale engine status across devices.
+    navigator.serviceWorker.getRegistrations().then((registrations) => {
+      registrations.forEach((registration) => {
+        registration.unregister();
+      });
+    }).catch(() => {
+      // ignore
     });
+
+    if ("caches" in window) {
+      caches.keys().then((names) => {
+        names.forEach((name) => caches.delete(name));
+      }).catch(() => {
+        // ignore
+      });
+    }
   });
 }
 
