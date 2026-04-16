@@ -71,11 +71,16 @@ let countdownTargetTime = null;
 
 function startCountdown(intervalSeconds, lastUpdateIso) {
   countdownIntervalSeconds = intervalSeconds || 300;
+  const intervalMs = countdownIntervalSeconds * 1000;
   if (lastUpdateIso) {
-    const lastMs = new Date(lastUpdateIso).getTime();
-    countdownTargetTime = lastMs + countdownIntervalSeconds * 1000;
+    let target = new Date(lastUpdateIso).getTime() + intervalMs;
+    // advance to the next future boundary
+    while (target <= Date.now()) {
+      target += intervalMs;
+    }
+    countdownTargetTime = target;
   } else {
-    countdownTargetTime = Date.now() + countdownIntervalSeconds * 1000;
+    countdownTargetTime = Date.now() + intervalMs;
   }
 }
 
