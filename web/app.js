@@ -355,6 +355,20 @@ function setConnection(ok, text) {
   connection.className = ok ? "badge badge-ok" : "badge badge-warn";
 }
 
+async function fetchJson(url, options = {}, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return await response.json();
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function renderTrades(items) {
   tradesBody.innerHTML = "";
   if (!items || !items.length) {
@@ -381,19 +395,11 @@ function renderTrades(items) {
 async function refresh() {
   try {
     const noStore = { cache: "no-store" };
-    const [summaryRes, tradesRes, engineRes] = await Promise.all([
-      fetch(apiPath("/api/summary"), noStore),
-      fetch(apiPath("/api/trades?limit=20"), noStore),
-      fetch(apiPath("/api/engine/status"), noStore),
+    const [summary, trades, engine] = await Promise.all([
+      fetchJson(apiPath("/api/summary"), noStore),
+      fetchJson(apiPath("/api/trades?limit=20"), noStore),
+      fetchJson(apiPath("/api/engine/status"), noStore),
     ]);
-
-    if (!summaryRes.ok || !tradesRes.ok || !engineRes.ok) {
-      throw new Error("API error");
-    }
-
-    const summary = await summaryRes.json();
-    const trades = await tradesRes.json();
-    const engine = await engineRes.json();
     const latest = summary.latest_snapshot;
     const running = Boolean(engine.running);
     if (lastKnownEngineRunning === null || running !== lastKnownEngineRunning) {
@@ -426,7 +432,14 @@ async function refresh() {
     renderTrades(trades.items || []);
     lastUpdateEl.textContent = `עודכן: ${new Date().toLocaleTimeString("he-IL")}`;
   } catch (error) {
-    setConnection(false, "אין חיבור ל-API. בדוק כתובת VPS");
+    setEngineStatus(null);
+    if (String(error?.message || "").includes("HTTP 403")) {
+      setConnection(false, "API חסום (403). בדוק Firewall/Proxy או כתובת VPS");
+    } else if (error?.name === "AbortError") {
+      setConnection(false, "תם הזמן בהתחברות ל-API. בדוק חיבור לרשת");
+    } else {
+      setConnection(false, "אין חיבור ל-API. בדוק כתובת VPS");
+    }
   }
 }
 
